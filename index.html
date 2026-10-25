@@ -44,6 +44,7 @@ h1 em,h2 em{font-style:normal;color:var(--ember)}
 .btn.ghost{background:transparent;color:var(--bone);box-shadow:inset 0 0 0 2px rgba(255,243,226,.5)}
 .row{display:flex;gap:10px;flex-wrap:wrap}
 .grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;width:100%}
+@media (min-width:560px){.grid{grid-template-columns:repeat(10,minmax(0,1fr));gap:6px}.lv{font-size:17px!important;padding:7px 0 6px!important}.lv small{font-size:8px!important}}
 .lv{font:400 22px var(--font-display);padding:10px 0 8px;border:0;border-radius:6px;background:var(--bone);color:var(--ink);cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px}
 .lv small{font:700 10px var(--font-body);letter-spacing:.08em;color:var(--ember-deep)}
 .lv:disabled{background:rgba(255,243,226,.1);color:rgba(255,243,226,.3);cursor:not-allowed}
@@ -397,6 +398,76 @@ const STAGES=[
   a.on(p=>p.cx>27.5&&p.onGround,()=>{saw.vx=-200; sfx('saw');});
  }},
 ];
+
+// ===== 31〜80: 部品を並べて作るステージ（毎回同じ並びになる）=====
+// 部品: build(a,x,L)=置く / plan(x)=クリア用の自動操作（テスト用）。幅は6〜8マス、最後にドアの部屋を付ける。
+(()=>{
+const rng=(seed=>()=>{seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;})(20261023);
+const SEG={
+ hole:{w:6,dead:1,hint:'ただの穴',
+  build(a,x){a.block(x,14,2,4);a.block(x+5,14,1,4);},
+  plan:x=>[{r:1,u:h=>h.cx>x+1.7},{r:1,j:1,u:h=>h.og&&h.cx>x+5.7}]},
+ dropFloor:{w:6,dead:1,hint:'床が落ちる',
+  build(a,x){a.block(x,14,2,4);const f=a.block(x+2,14,3,4);a.block(x+5,14,1,4);a.on(p=>p.cx>x+0.8,()=>drop(f));},
+  plan:x=>[{r:1,u:h=>h.cx>x+1.6},{r:1,j:1,u:h=>h.og&&h.cx>x+5.7}]},
+ spikePop:{w:6,dead:1,hint:'トゲが生える',
+  build(a,x){a.block(x,14,6,4);const sp=a.spikes(x+3,13,2,'up',{hidden:true});a.on(p=>p.cx>x+1.4,()=>rise(sp));},
+  plan:x=>[{r:1,u:h=>h.cx>x+1.9},{r:1,j:1,u:h=>h.og&&h.cx>x+5.7}]},
+ spikeRow:{w:7,dead:1,hint:'長いトゲ',
+  build(a,x){a.block(x,14,7,4);const sp=a.spikes(x+3,13,3,'up',{hidden:true});a.on(p=>p.cx>x+1.4,()=>rise(sp));},
+  plan:x=>[{r:1,u:h=>h.cx>x+1.8},{r:1,j:1,u:h=>h.og&&h.cx>x+6.7}]},
+ fakeSpikes:{w:6,dead:0,hint:'ニセのトゲ',
+  build(a,x){a.block(x,14,6,4);a.spikes(x+2,13,3,'up',{fake:true});},
+  plan:x=>[{r:1,u:h=>h.cx>x+5.7}]},
+ invisible:{w:6,dead:0,hint:'見えない床',
+  build(a,x){a.block(x,14,2,4);a.block(x+2,14,3,4,{invis:true});a.block(x+5,14,1,4);},
+  plan:x=>[{r:1,u:h=>h.cx>x+5.7}]},
+ blockDrop:{w:6,dead:1,hint:'空から落ちてくる',
+  build(a,x){a.block(x,14,6,4);const b=a.block(x+3,-2,2,2);a.on(p=>p.cx>x+0.6,()=>{b.fall=true;b.vy=300;b.stopY=12*T;sfx('whoosh');});},
+  plan:x=>[{r:1,u:h=>h.cx>x+0.7},{f:70},{r:1,u:h=>h.cx>x+1.4},{r:1,j:1,u:h=>h.og&&h.cx>x+5.7}]},
+ stalactite:{w:6,dead:1,hint:'つらら',
+  build(a,x){a.block(x,14,6,4);const sp=a.spikes(x+3,6,2,'down',{});a.on(p=>p.cx>x+1.0,()=>{sp.fall=true;sp.stopY=14*T-SH;sfx('spike');});},
+  plan:x=>[{r:1,u:h=>h.cx>x+1.05},{f:80},{r:1,u:h=>h.cx>x+1.7},{r:1,j:1,u:h=>h.og&&h.cx>x+5.7}]},
+ sawRise:{w:6,dead:1,hint:'地面からのこぎり',
+  build(a,x){a.block(x,14,6,4);const sw=a.saw(x+3.5,15.5,26);a.on(p=>p.cx>x+1.2,()=>{tween(sw,{y:14*T},0.15);sfx('saw');});},
+  plan:x=>[{r:1,u:h=>h.cx>x+2.0},{r:1,j:1,u:h=>h.og&&h.cx>x+5.7}]},
+ flipHole:{w:8,dead:1,hint:'左右が逆になる',
+  build(a,x){a.block(x,14,3,4);a.block(x+6,14,2,4);a.on(p=>p.cx>x+0.8,()=>setFlip(true));a.on(p=>p.cx>x+6.4&&p.onGround,()=>setFlip(false));},
+  plan:x=>[{r:1,u:h=>h.L.flip},{l:1,u:h=>h.cx>x+2.2},{l:1,j:1,u:h=>h.og&&h.cx>x+6.2},{l:1,u:h=>!h.L.flip},{r:1,u:h=>h.cx>x+7.8}]},
+};
+const END={
+ plain:{hint:'ドアは普通',build(a,x){a.block(x,14,32-x,4);a.door(30,14);}},
+ flee:{hint:'ドアが逃げる',build(a,x){a.block(x,14,32-x,4);const d=a.door(x+1.5,14);a.on(p=>p.cx>x+0.3,()=>{tween(d,{x:30.5*T,y:d.y},0.35,{hop:100});sfx('whoosh');});}},
+ trapDoor:{hint:'ニセドアの下は穴',build(a,x){a.block(x,14,1,4);const f=a.block(x+1,14,2,4);a.block(x+3,14,32-x-3,4);a.door(x+1.5,14,{fake:true,follow:f});a.door(30,14);a.on(p=>p.cx>x+0.3,()=>drop(f,0.1));},
+  plan:x=>[{r:1,u:h=>h.cx>x+0.6},{r:1,j:1,u:h=>h.og&&h.cx>x+3.3},{r:1,u:h=>h.cx>30.45},{l:1,u:()=>false}]},
+};
+const TITLES=['ひと息つこう','かんたんだよ','見たまんま','信じてOK','ここは安全','ただの散歩','さっきと同じ','気楽にどうぞ','たぶん大丈夫','ごほうびステージ',
+ '今度こそ本当に','何もないよ','ふつうの道','まちがいさがし','急がば回れ','見なかったことに','よく見て','ひとやすみ','そこは罠じゃない','いつもの道',
+ 'うしろは見ない','おやくそく','考えすぎ','とりあえず走れ','正面突破','おさらい','ほんの少し','あんしん設計','初心者むけ','いいから進め',
+ '十分ほど前','出口はこちら','うたがいの目','しんじる者','ゆだんたいてき','落ちついて','だまされた？','もう少し','確認しよう','近道かも',
+ '裏の裏','三度目の正直','待つのも手','おもてなし','気のせい','ちょっと待って','上を見て','足元注意','どこまでも','これが最後？'];
+const hasNaiveSafe=list=>list.every(k=>!SEG[k].dead);
+const START=3, LIMIT=27;
+for(let n=0;n<50;n++){
+  const want=n<12?3:n<30?(rng()<.4?4:3):(rng()<.7?4:3);
+  const segs=[]; let used=START, last='';
+  let guard=0;
+  while(segs.length<want&&guard++<200){
+    const ks=Object.keys(SEG); const k=ks[Math.floor(rng()*ks.length)];
+    if(k===last||used+SEG[k].w>LIMIT)continue;
+    if(segs.length===want-1&&segs.filter(q=>SEG[q].dead).length+SEG[k].dead<2)continue;
+    segs.push(k); used+=SEG[k].w; last=k;
+  }
+  const eks=n<8?['plain']:n<25?['plain','flee','trapDoor']:['flee','trapDoor','plain'];
+  const ek=eks[Math.floor(rng()*eks.length)];
+  const hints=segs.map((k,i)=>`${i+1}：${SEG[k].hint}`).join('　')+(ek==='plain'?'':'　最後：'+END[ek].hint);
+  const auto=[]; let x=START;
+  for(const k of segs){auto.push(...SEG[k].plan(x)); x+=SEG[k].w;}
+  if(END[ek].plan)auto.push(...END[ek].plan(x)); else auto.push({r:1,u:()=>false});
+  STAGES.push({title:TITLES[n],hint:hints,auto,
+    build(a,L){a.block(0,14,3,4);let xx=START;for(const k of segs){SEG[k].build(a,xx,L);xx+=SEG[k].w;}END[ek].build(a,xx,L);}});
+}
+})();
 
 // ===== 状態 =====
 const cv=document.getElementById('game'), ctx=cv.getContext('2d');
@@ -799,6 +870,7 @@ function frame(now){
   while(acc>=STEP){update(STEP); acc-=STEP;}
   render(); requestAnimationFrame(frame);
 }
+{const N=STAGES.length; document.querySelector('#title .eyebrow').textContent='TRAP PLATFORMER ・ '+N+' STAGES'; const ld=document.querySelector('#title .lead'); ld.textContent=ld.textContent.replace(/\d+ステージ/,N+'ステージ'); document.querySelector('#ending .eyebrow').textContent='ALL '+N+' STAGES CLEAR';}
 resize(); buildStage(0); spawn(); renderGrid(); requestAnimationFrame(frame);
 if(document.fonts&&document.fonts.ready) document.fonts.ready.then(()=>render());
 
